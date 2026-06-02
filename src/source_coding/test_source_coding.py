@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 from src.source_coding.encoder import (
-    JPEGEncoder,
+    DCTEncoder,
     _Huffman,
     _build_quant_table,
     _bytes_to_ints,
@@ -25,7 +25,7 @@ from src.source_coding.encoder import (
     _zigzag,
 )
 from src.source_coding.decoder import (
-    JPEGDecoder,
+    DCTDecoder,
     _HuffmanDecoder,
     _idct2d,
 )
@@ -235,8 +235,8 @@ class TestEncodeDecodePipeline(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.encoder = JPEGEncoder(quality=75)
-        cls.decoder = JPEGDecoder()
+        cls.encoder = DCTEncoder(quality=75)
+        cls.decoder = DCTDecoder()
 
     def _roundtrip(self, image: np.ndarray):
         encoded = self.encoder.encode(image)
@@ -318,8 +318,8 @@ class TestQualityCompressionTradeoff(unittest.TestCase):
     IMG = np.random.RandomState(42).randint(0, 256, (64, 48, 3)).astype(np.uint8)
 
     def _measure(self, quality: int):
-        enc = JPEGEncoder(quality=quality)
-        dec = JPEGDecoder()
+        enc = DCTEncoder(quality=quality)
+        dec = DCTDecoder()
         encoded = enc.encode(self.IMG)
         reconstructed = dec.decode(encoded['bits'], encoded['header'])
         bpp_val = _bpp(encoded['bits'], *self.IMG.shape[:2])
@@ -352,8 +352,8 @@ class TestQualityCompressionTradeoff(unittest.TestCase):
 
     def test_q_extremes_produce_valid_output(self):
         for q in (1, 100):
-            enc = JPEGEncoder(quality=q)
-            dec = JPEGDecoder()
+            enc = DCTEncoder(quality=q)
+            dec = DCTDecoder()
             encoded = enc.encode(self.IMG)
             rec = dec.decode(encoded['bits'], encoded['header'])
             self.assertEqual(rec.shape, self.IMG.shape)
@@ -371,8 +371,8 @@ class TestDCdifferential(unittest.TestCase):
 
         noisy = rng.randint(0, 256, (32, 32, 3), dtype=np.uint8)
 
-        enc = JPEGEncoder(quality=75)
-        dec = JPEGDecoder()
+        enc = DCTEncoder(quality=75)
+        dec = DCTDecoder()
 
         enc_s = enc.encode(smooth)
         enc_n = enc.encode(noisy)

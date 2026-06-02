@@ -84,10 +84,10 @@ def _ycbcr_to_rgb(ycbcr: np.ndarray) -> np.ndarray:
 #  JPEG Decoder  (SourceCodec interface)
 # =====================================================================
 
-class JPEGDecoder(SourceCodec):
+class DCTDecoder(SourceCodec):
     """JPEG-like decoder implementing ``SourceCodec``.
 
-    Reverses the pipeline produced by ``JPEGEncoder``: Huffman-decode the
+    Reverses the pipeline produced by ``DCTEncoder``: Huffman-decode the
     bitstream, unpack RLE symbols, rebuild coefficient blocks, apply
     inverse DCT, and convert back to RGB.
     """
@@ -102,7 +102,7 @@ class JPEGDecoder(SourceCodec):
         """Lossy source decoding.
 
         Args:
-            bits: 0/1 bitstream from ``JPEGEncoder.encode``.
+            bits: 0/1 bitstream from ``DCTEncoder.encode``.
             header: dict with keys ``orig_h``, ``orig_w``, ``quality``,
                     ``huffman_table``.
 

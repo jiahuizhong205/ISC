@@ -290,7 +290,7 @@ class _Huffman:
 #  JPEG Encoder  (SourceCodec interface)
 # =====================================================================
 
-class JPEGEncoder(SourceCodec):
+class DCTEncoder(SourceCodec):
     """JPEG-like encoder implementing ``SourceCodec``.
 
     Parameters
