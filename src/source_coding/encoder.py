@@ -188,16 +188,19 @@ def _rle_decode(rle_flat: list[int], idx: int) -> tuple[np.ndarray, int]:
     coeffs[0] = float(dc)
 
     k = 1  # next AC position in zigzag order
-    while k < 64 and idx < len(rle_flat):
+    while k < 64 and idx + 1 < len(rle_flat):
         run = rle_flat[idx]
         val = rle_flat[idx + 1]
         idx += 2
         if run == 0 and val == 0:
             break                     # EOB
+
+        # 容错：run 值明显异常时停止该块解码
+        if run < 0 or run > 63 or k + run >= 64:
+            break
         k += run
-        if k < 64:
-            coeffs[k] = float(val)
-            k += 1
+        coeffs[k] = float(val)
+        k += 1
 
     return coeffs, idx
 
@@ -212,7 +215,14 @@ def _ints_to_bytes(ints: list[int]) -> bytes:
 
 
 def _bytes_to_ints(data: bytes) -> list[int]:
-    """Unpack signed 16-bit big-endian bytes back to a list of ints."""
+    """Unpack signed 16-bit big-endian bytes back to a list of ints.
+
+    Truncates trailing odd byte that may result from corrupted Huffman decode.
+    """
+    if len(data) % 2 != 0:
+        data = data[:-1]
+    if len(data) == 0:
+        return []
     return np.frombuffer(data, dtype='>i2').tolist()
 
 
@@ -300,10 +310,11 @@ class DCTEncoder(SourceCodec):
         weaker quantization.
     """
 
-    def __init__(self, quality: int = 75):
+    def __init__(self, quality: int = 75, repeat: int = 5):
         if not 1 <= quality <= 100:
             raise ValueError("quality must be in [1, 100]")
         self.quality = quality
+        self.repeat = repeat
         self._QY = _build_quant_table(_QY, quality)
         self._QC = _build_quant_table(_QC, quality)
 
@@ -339,35 +350,49 @@ class DCTEncoder(SourceCodec):
         # 2. Pad to multiples of 8 (symmetric)
         padded, _, _ = _pad_to_multiple(ycbcr)
 
-        # 3. Block-wise: DCT → quantize → zigzag → DC diff → RLE
-        rle_flat: list[int] = []
-        prev_dc = [0.0, 0.0, 0.0]  # Y, Cb, Cr
+        # 3. Block-wise: DCT → quantize → zigzag → RLE
+        #    每块的 RLE 数据单独编码，block_lengths 记录 Huffman 后字节数
+        block_rle: list[list[int]] = []
 
         for _, _, c, block in _iter_blocks(padded):
             dct_block = _dct2d(block.astype(np.float64) - 128.0)
             qtable = self._QY if c == 0 else self._QC
             quantized = np.round(dct_block / qtable)
             zigzagged = _zigzag(quantized)
+            block_rle.append(_rle_encode(zigzagged))
 
-            # DC differential coding
-            dc = zigzagged[0]
-            zigzagged[0] = dc - prev_dc[c]
-            prev_dc[c] = dc
+        # 4. 每块 RLE → int16 bytes → 全局 Huffman → bits（定长补到字节边界）
+        all_block_bytes: list[bytes] = []
+        all_raw = bytearray()
+        for rle in block_rle:
+            raw = _ints_to_bytes(rle)
+            all_block_bytes.append(raw)
+            all_raw.extend(raw)
 
-            rle_flat.extend(_rle_encode(zigzagged))
-
-        # 4. RLE ints → bytes → Huffman → bits
-        raw_bytes = _ints_to_bytes(rle_flat)
         huff = _Huffman()
-        huff.build(raw_bytes)
-        bits = huff.encode(raw_bytes)
+        huff.build(bytes(all_raw))  # 用所有块的数据建全局 Huffman 表
+
+        bits = []
+        block_byte_lengths: list[int] = []
+        for raw in all_block_bytes:
+            block_bits = huff.encode(raw)
+            # 补到整字节
+            pad = (8 - len(block_bits) % 8) % 8
+            if pad:
+                block_bits.extend([0] * pad)
+            # Nx 重复：单 bit 错只毁本块，多数投票消除残留错误
+            for _ in range(self.repeat):
+                bits.extend(block_bits)
+            block_byte_lengths.append((len(block_bits) // 8) * self.repeat)
 
         header = {
             'orig_h': orig_h,
             'orig_w': orig_w,
             'channels': 3,
             'quality': self.quality,
+            'block_byte_lengths': block_byte_lengths,
             'huffman_table': huff.table,
+            'repeat': self.repeat,
         }
 
         return {'bits': bits, 'header': header}

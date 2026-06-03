@@ -149,8 +149,8 @@ def run_single(image_name: str, original: np.ndarray,
     try:
         from src.source_coding.encoder import DCTEncoder
         t0 = time.time()
-        encoder = DCTEncoder(quality=quality)
-        source_bits, header = encoder.encode(original)
+        encoder = DCTEncoder(quality=quality, repeat=5)
+        encoded = encoder.encode(original); source_bits = encoded['bits']; header = encoded['header']
         result['time_source_enc'] = time.time() - t0
         result['compression_ratio'] = (
             original.size * 8 / len(source_bits)
@@ -174,22 +174,46 @@ def run_single(image_name: str, original: np.ndarray,
         encoded_bits = list(source_bits)
         result['time_channel_enc'] = 0.0
 
+    # ── 交织 ──
+    interleaver = None
+    encoded_len_before_interleave = len(encoded_bits)
+    try:
+        from src.channel_coding.interleaver import BlockInterleaver
+        t0 = time.time()
+        interleaver = BlockInterleaver(rows=64, cols=128)
+        tx_bits = interleaver.interleave(encoded_bits)
+        result['time_interleave'] = time.time() - t0
+    except ImportError:
+        tx_bits = list(encoded_bits)
+        result['time_interleave'] = 0.0
+
     # ── 信道传输 ──
     channel = create_channel(channel_type, param, seed=seed)
     t0 = time.time()
-    received, actual_rate = channel.transmit(encoded_bits)
+    received, actual_rate = channel.transmit(tx_bits)
     result['time_transmission'] = time.time() - t0
     result['actual_error_rate'] = actual_rate
 
-    # ── 信道译码 ──
+    # ── 解交织 + 信道译码 ──
     try:
         from src.channel_coding.convolutional import ConvCodec
+
+        t0 = time.time()
+        if interleaver is not None:
+            deinterleaved = interleaver.deinterleave(received)
+            deinterleaved = deinterleaved[:encoded_len_before_interleave]
+        else:
+            deinterleaved = list(received)
+        t_deinter = time.time() - t0
+
         t0 = time.time()
         if channel_codec is None:
             channel_codec = ConvCodec()
-        decoded_bits = channel_codec.decode(received, channel_type=channel_type)
-        result['time_channel_dec'] = time.time() - t0
+        decoded_bits = channel_codec.decode(deinterleaved, channel_type=channel_type)
+        result['time_channel_dec'] = time.time() - t0 + t_deinter
     except ImportError:
+        if interleaver is not None:
+            received = interleaver.deinterleave(received)[:encoded_len_before_interleave]
         decoded_bits = [int(b) if b is not None else 0 for b in received]
         result['time_channel_dec'] = 0.0
 

@@ -42,20 +42,32 @@ class _HuffmanDecoder:
             node['_sym'] = int(hex_sym, 16)
 
     def decode(self, bits: list[int]) -> bytes:
-        """Walk the prefix tree bit-by-bit, emitting a byte on each leaf."""
+        """Walk the prefix tree bit-by-bit, emitting a byte on each leaf.
+
+        Corrupted bits that don't match any prefix cause a reset to root,
+        allowing the decoder to resynchronise on subsequent bits.
+        """
         result = bytearray()
         node = self._root
+        errors = 0
         for b in bits:
             ch = str(b)
             if ch not in node:
-                raise ValueError(
-                    f"Bit {b} at position {len(result)} does not match "
-                    f"any Huffman prefix (partial decode: {bytes(result)!r})"
-                )
+                # 非法码字：bit 损坏导致路径不存在，重置继续
+                errors += 1
+                node = self._root
+                # 重试当前 bit 在新 root 下
+                if ch in node:
+                    node = node[ch]
+                continue
             node = node[ch]
             if '_sym' in node:
                 result.append(node['_sym'])
                 node = self._root
+        if errors > 0:
+            import sys
+            print(f"  [WARN] Huffman 解码: {errors} 个非法码字被跳过 "
+                  f"(共 {len(bits)} bits)", file=sys.stderr)
         return bytes(result)
 
 
@@ -112,7 +124,6 @@ class DCTDecoder(SourceCodec):
         orig_h: int = header['orig_h']
         orig_w: int = header['orig_w']
         quality: int = header['quality']
-        huffman_table: dict[str, str] = header['huffman_table']
 
         # Padded dimensions (reverse of symmetric pad)
         pad_h = (8 - orig_h % 8) % 8
@@ -124,26 +135,77 @@ class DCTDecoder(SourceCodec):
         QY = _build_quant_table(_QY, quality)
         QC = _build_quant_table(_QC, quality)
 
-        # 1. Huffman decode: bits → bytes
-        huff = _HuffmanDecoder(huffman_table)
-        raw_bytes = huff.decode(bits)
+        # 1. bits → bytes
+        byte_count = len(bits) // 8
+        raw_bytes_all = bytes(
+            sum(bits[i * 8 + j] << (7 - j) for j in range(8))
+            for i in range(byte_count)
+        )
 
-        # 2. Bytes → RLE integer list
-        rle_flat = _bytes_to_ints(raw_bytes)
-
-        # 3. Block-by-block reconstruction
+        # 2. 每块独立解码——按 block_byte_lengths 跳块 + Nx 多数投票 + Huffman
+        block_byte_lengths: list[int] = header.get('block_byte_lengths', [])
+        huffman_table: dict[str, str] = header.get('huffman_table', {})
+        repeat: int = header.get('repeat', 1)
         ycbcr = np.empty((padded_h, padded_w, 3), dtype=np.float64)
-        prev_dc = [0.0, 0.0, 0.0]   # Y, Cb, Cr
-        idx = 0
 
+        # 预计算每个块的字节偏移
+        offsets = [0]
+        for bl in block_byte_lengths:
+            offsets.append(offsets[-1] + bl)
+
+        block_idx = 0
         for i in range(0, padded_h, 8):
             for j in range(0, padded_w, 8):
                 for c in range(3):
-                    coeffs_1d, idx = _rle_decode(rle_flat, idx)
+                    coeffs_1d = np.zeros(64, dtype=np.float64)
+                    if block_idx < len(block_byte_lengths):
+                        byte_start = offsets[block_idx]
+                        byte_end = offsets[block_idx + 1]
+                        if byte_start < len(raw_bytes_all):
+                            try:
+                                block_bytes = raw_bytes_all[byte_start:min(byte_end, len(raw_bytes_all))]
 
-                    # DC differential recovery
-                    coeffs_1d[0] += prev_dc[c]
-                    prev_dc[c] = coeffs_1d[0]
+                                if huffman_table and repeat > 1:
+                                    # 多数投票 + Huffman 解码
+                                    chunk = len(block_bytes) // repeat
+                                    # 逐 byte 投票
+                                    voted = bytearray()
+                                    for pos in range(chunk):
+                                        val = 0
+                                        for bit_pos in range(8):
+                                            ones = 0
+                                            for r in range(repeat):
+                                                idx = pos + r * chunk
+                                                if idx < len(block_bytes):
+                                                    ones += (block_bytes[idx] >> (7 - bit_pos)) & 1
+                                            val = (val << 1) | (1 if ones > repeat // 2 else 0)
+                                        voted.append(val)
+                                    voted_bits = []
+                                    for b in voted:
+                                        for s in range(7, -1, -1):
+                                            voted_bits.append((b >> s) & 1)
+                                    huff_dec = _HuffmanDecoder(huffman_table)
+                                    block_raw_bytes = huff_dec.decode(voted_bits)
+                                    block_ints = _bytes_to_ints(block_raw_bytes)
+                                    coeffs_1d, _ = _rle_decode(block_ints, 0)
+                                elif huffman_table:
+                                    # Huffman 解码 (无重复)
+                                    block_bits = []
+                                    for b in block_bytes:
+                                        for s in range(7, -1, -1):
+                                            block_bits.append((b >> s) & 1)
+                                    huff_dec = _HuffmanDecoder(huffman_table)
+                                    block_raw_bytes = huff_dec.decode(block_bits)
+                                    block_ints = _bytes_to_ints(block_raw_bytes)
+                                    coeffs_1d, _ = _rle_decode(block_ints, 0)
+                                else:
+                                    # 无 Huffman 表：直接 int16 解码
+                                    block_ints = _bytes_to_ints(block_bytes)
+                                    coeffs_1d, _ = _rle_decode(block_ints, 0)
+                            except Exception:
+                                pass  # 块损坏，保持零块（灰色）
+                        block_idx += 1
+                    # block_idx 超出范围：保持零块
 
                     block = _inverse_zigzag(coeffs_1d)          # 8×8
                     qtable = QY if c == 0 else QC

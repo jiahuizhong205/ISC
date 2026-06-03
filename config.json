@@ -1,0 +1,10 @@
+{
+    "image": "data/kodim01.png",
+    "channel": "bsc",
+    "param": 0.001,
+    "quality": 75,
+    "repeat": 3,
+    "seed": 42,
+    "output": "output/result.png",
+    "save_bin": ""
+}
