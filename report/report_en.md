@@ -1,14 +1,16 @@
 # ISC Project 2 — Final Report: Image Lossy Source Coding & Channel Coding
 
-**Course:** NJU 2026 Spring — Fundamentals of Information Theory  
-**Team Members:** 张海洋 (Source Coding), 仲嘉辉 (Channel Coding), 冉丽滢 (System Integration), 陈玉熙 (Evaluation & Report)  
+**Course:** NJU 2026 Spring — Fundamentals of Information Theory
+**Team Members:** 张海洋 (Source Coding), 冉丽滢 (Channel Coding), 仲嘉辉 (System Integration), 陈玉熙 (Evaluation & Report)
 **Date:** June 2026
 
 ---
 
 ## Abstract
 
-This report presents the design, implementation, and comprehensive performance evaluation of an end-to-end image transmission system over noisy channels. The system employs DCT-based lossy source coding (JPEG-like), (2,1,7) convolutional channel coding with Viterbi decoding, and block interleaving. Performance is assessed across three dimensions: **Accuracy** (error correction), **Algorithm Complexity** (computational cost), and **Reconstruction Quality** (PSNR & SSIM). Experiments were conducted over Binary Symmetric Channel (BSC) and Binary Erasure Channel (BEC) with varying error probabilities and quality factors.
+This report presents the design, implementation, and comprehensive performance evaluation of an end-to-end image transmission system over noisy channels. The system employs DCT-based lossy source coding (JPEG-like), (2,1,7) convolutional channel coding with Viterbi decoding, and block interleaving. Performance is assessed across three dimensions: **Accuracy** (error correction), **Algorithm Complexity** (computational cost), and **Reconstruction Quality** (PSNR & SSIM). Experiments were conducted over Binary Symmetric Channel (BSC) and Binary Erasure Channel (BEC) with varying error probabilities, quality factors, and random seeds.
+
+**Important note on experimental data:** All experiments use 256×256 synthetic test images (sinusoidal patterns, geometric shapes, smooth gradients, and random noise). No real photographic images were used. Results are averaged across 3 independent random seeds (42, 123, 456) to provide statistical variance estimates. The Viterbi decoder is implemented in pure Python — its runtime should not be taken as representative of optimized implementations.
 
 ---
 
@@ -66,7 +68,7 @@ Input Image (RGB)
 | Channel Code | (2,1,7) Convolutional | Generators: (171, 133) octal |
 | Decoding | Viterbi (hard/soft) | K=7, 64 states |
 | Interleaving | Block (64×128) | Row-in, column-out |
-| Channel | BSC / BEC | ε ∈ [0, 0.15], p ∈ [0, 0.3] |
+| Channel | BSC / BEC | ε ∈ [0, 0.1], p ∈ [0, 0.2] |
 
 ---
 
@@ -77,8 +79,8 @@ Input Image (RGB)
 | Dimension | Metric | Formula / Description |
 |-----------|--------|-----------------------|
 | Accuracy | Channel BER | Fraction of bits flipped/erased during transmission |
-| Accuracy | Residual BER | Bit error rate after Viterbi decoding |
-| Accuracy | Compression Ratio | raw_image_bits ÷ compressed_bits |
+| Accuracy | Residual BER (Viterbi) | Bit error rate after Viterbi decoding |
+| Accuracy | Compression Ratio | raw_image_bits ÷ compressed_bits (without repeat) |
 | Complexity | Per-stage timing | Wall-clock time via `time.perf_counter()` |
 | Quality | PSNR | $10 \cdot \log_{10}(255^2 / \text{MSE})$ |
 | Quality | SSIM | Wang et al. (2004), Gaussian window 11×11 |
@@ -87,13 +89,13 @@ Input Image (RGB)
 
 | Parameter | Values |
 |-----------|--------|
-| Test Images | 4 types: nature scene, geometric shapes, smooth gradient, random noise (256×256 RGB) |
+| Test Images | 4 synthetic types: sinusoidal nature, geometric shapes, smooth gradient, random noise (256×256 RGB) |
 | Quality Factor Q | 10, 50, 90 |
-| Repeat Encoding N | 1, 3, 5 |
+| Repeat Encoding N | 1 (baseline) |
 | BSC Error Rate ε | 0, 0.01, 0.05, 0.10 |
 | BEC Erasure Rate p | 0, 0.05, 0.10, 0.20 |
-| Random Seed | 42 (deterministic) |
-| Total Experiments | 102 |
+| Random Seeds | 42, 123, 456 |
+| Total Experiments | 288 |
 
 ---
 
@@ -101,28 +103,30 @@ Input Image (RGB)
 
 ### 3.1 PSNR Performance
 
-#### 3.1.1 Error-Free Conditions
+#### 3.1.1 Error-Free Conditions (ε = 0, p = 0)
 
 | Quality Q | PSNR Range (dB) | Mean PSNR (dB) | Visual Quality |
 |-----------|-----------------|----------------|----------------|
-| Q = 10 | 11.2 ~ 33.2 | 26.2 | Acceptable — visible artifacts |
-| Q = 50 | 16.8 ~ 43.8 | 34.6 | Good — slight distortion |
-| Q = 90 | 30.0 ~ 55.2 | 44.8 | Excellent — nearly lossless |
+| Q = 10 | 11.2 ~ 33.2 | 26.2 | Acceptable — visible artifacts on noise images |
+| Q = 50 | 16.8 ~ 43.8 | 34.5 | Good — slight distortion on complex content |
+| Q = 90 | 30.0 ~ 55.2 | 44.8 | Excellent — near-lossless for structured images |
 
-**Image-type variation:** Smooth gradient images achieve the highest PSNR (55.2 dB at Q=90). Random noise images show the lowest PSNR (11.2 dB at Q=10) due to high-frequency content that is poorly compressed by DCT.
+**Image-type dependence:** Smooth gradient images achieve the highest PSNR (55.2 dB at Q=90) due to efficient DCT compaction. Random noise images show the lowest PSNR (11.2 dB at Q=10) because high-frequency content is poorly compressed by DCT.
 
-#### 3.1.2 Impact of Channel Errors
+#### 3.1.2 Impact of Channel Errors (N=1, no repeat)
 
 | Channel Condition | PSNR Range (dB) | Mean PSNR (dB) | Degradation |
 |-------------------|-----------------|----------------|-------------|
-| BSC ε = 0.01, Q=50 | 6.3 ~ 14.3 | 10.9 | Severe |
-| BSC ε = 0.05, Q=50 | 5.8 ~ 9.0 | 7.6 | Catastrophic |
-| BSC ε = 0.10, Q=50 | 5.7 ~ 7.0 | 6.5 | Catastrophic |
-| BEC p = 0.05, Q=50 | 10.1 ~ 23.9 | 18.5 | Moderate |
-| BEC p = 0.10, Q=50 | 7.1 ~ 16.7 | 13.0 | Severe |
-| BEC p = 0.20, Q=50 | 6.0 ~ 11.9 | 9.2 | Very Severe |
+| BSC ε = 0.01, Q=50 | 5.7 ~ 14.7 | 10.1 | Severe |
+| BSC ε = 0.05, Q=50 | 5.7 ~ 9.0 | 7.5 | Catastrophic |
+| BSC ε = 0.10, Q=50 | 5.7 ~ 7.0 | 6.6 | Catastrophic |
+| BEC p = 0.05, Q=50 | 10.1 ~ 24.7 | 17.9 | Moderate |
+| BEC p = 0.10, Q=50 | 7.1 ~ 18.0 | 13.2 | Severe |
+| BEC p = 0.20, Q=50 | 6.0 ~ 12.0 | 9.4 | Very Severe |
 
-**Key finding:** BEC consistently outperforms BSC at equivalent error probabilities. At p/ε = 0.05, BEC yields PSNR ~18.5 dB versus BSC's ~7.6 dB. This is because BEC erasures are explicitly marked (enabling soft-decision Viterbi decoding), whereas BSC bit flips are indistinguishable from correct bits.
+**Key finding:** BEC consistently outperforms BSC at equivalent error probabilities. At p/ε = 0.05, BEC yields mean PSNR ~17.9 dB versus BSC's ~7.5 dB. This is because BEC erasures are explicitly marked (enabling soft-decision Viterbi decoding), whereas BSC bit flips are indistinguishable from correct bits.
+
+**Seed-to-seed variance:** Across the 3 random seeds, PSNR varies by up to ±2 dB for the same (channel, param, Q) combination, reflecting the stochastic nature of channel errors.
 
 ### 3.2 SSIM Analysis
 
@@ -138,10 +142,10 @@ Input Image (RGB)
 
 | Channel Condition | SSIM Range | Mean SSIM |
 |-------------------|-----------|-----------|
-| BSC ε = 0.01, Q=50 | 0.1307 ~ 0.6003 | 0.4247 |
-| BSC ε = 0.05, Q=50 | 0.0374 ~ 0.2213 | 0.1332 |
-| BEC p = 0.05, Q=50 | 0.5925 ~ 0.9249 | 0.8143 |
-| BEC p = 0.10, Q=50 | 0.2631 ~ 0.7683 | 0.5800 |
+| BSC ε = 0.01, Q=50 | 0.1261 ~ 0.6471 | 0.4462 |
+| BSC ε = 0.05, Q=50 | 0.0374 ~ 0.2226 | 0.1332 |
+| BEC p = 0.05, Q=50 | 0.5880 ~ 0.9249 | 0.8137 |
+| BEC p = 0.10, Q=50 | 0.2586 ~ 0.7900 | 0.5833 |
 
 #### 3.2.3 PSNR-SSIM Correlation
 
@@ -157,88 +161,73 @@ PSNR and SSIM exhibit strong positive correlation across all experimental condit
 
 **Observations:**
 
-- **Content dependence:** Smooth gradient images compress 35× at Q=10; noise images achieve only 2× at Q=50.
-- **Data expansion:** At Q=90, random noise produces a compressed stream larger than the raw pixels (CR = 0.9×). The high-frequency DCT coefficients resist quantization, and Huffman coding cannot compact them effectively.
-- **Quality-compression trade-off:** Each doubling of compression ratio (from Q=10 to Q=50) costs approximately 8 dB in PSNR for structured images.
+- **Content dependence is extreme:** Smooth gradient images compress 35× at Q=10, while noise images achieve only 2× at Q=50. The compression ratio varies by >10× depending solely on image content.
+- **Data expansion occurs:** At Q=90, random noise produces a compressed stream larger than the raw pixels (CR = 0.9×). The high-frequency DCT coefficients resist quantization, and Huffman coding cannot compact them effectively.
+- **Quality-compression trade-off:** Moving from Q=10 to Q=50 roughly doubles the bitrate while gaining ~8 dB PSNR for structured images.
 
 ### 3.4 Viterbi Decoder Error Correction
 
 | Channel | Error Prob. | Channel BER | Residual BER | Improvement Factor |
 |---------|------------|-------------|-------------|-------------------|
-| BSC | ε = 0.01 | 1.00% | 1.07% | 0.94× (no gain) |
-| BSC | ε = 0.05 | 4.96% | 5.37% | 0.92× (no gain) |
-| BSC | ε = 0.10 | 10.03% | 10.55% | 0.95× (no gain) |
-| BEC | p = 0.05 | 4.96% | 0.13% | ~38× |
-| BEC | p = 0.10 | 10.03% | 0.55% | ~18× |
+| BSC | ε = 0.01 | 1.00% | 1.07% | 0.94× (**worse**) |
+| BSC | ε = 0.05 | 4.96% | 5.34% | 0.93× (**worse**) |
+| BSC | ε = 0.10 | 10.03% | 10.59% | 0.95× (**worse**) |
+| BEC | p = 0.05 | 5.00% | 0.13% | ~38× |
+| BEC | p = 0.10 | 10.02% | 0.55% | ~18× |
 | BEC | p = 0.20 | 20.10% | 2.20% | ~9× |
 
 **Critical analysis:**
 
-1. **BSC performance is poor.** The (2,1,7) convolutional code provides negligible BER improvement on BSC at ε ≥ 1%. At ε = 0.01, the channel BER of ~1% exceeds the code's correction capacity for a rate-1/2 code. The code's minimum free distance (d_free = 10) is insufficient to correct random errors at these densities.
+1. **Hard-decision Viterbi on BSC is counterproductive.** At all tested ε ≥ 1%, the residual BER after Viterbi decoding is *higher* than the raw channel BER. The (2,1,7) convolutional code with hard-decision decoding cannot correct random errors at these densities. This is a fundamental limitation of hard-decision Viterbi, not a bug.
 
-2. **BEC performance is excellent.** Soft-decision Viterbi decoding exploits the known erasure positions, achieving 9–38× BER reduction. At p = 0.05, residual BER drops to ~0.13%, enabling high-quality reconstruction.
+2. **Soft-decision Viterbi on BEC is highly effective.** Exploiting known erasure positions, the decoder achieves 9–38× BER reduction. At p = 0.05, residual BER drops to ~0.13%, enabling acceptable reconstruction quality (PSNR ~18 dB at Q=50).
 
-3. **Interleaving is essential for BEC.** The 64×128 block interleaver converts potential burst erasures into isolated erasures that the Viterbi decoder handles well.
+3. **Interleaving is critical for BEC.** The 64×128 block interleaver converts potential burst erasures into isolated erasures that the Viterbi decoder handles effectively.
+
+4. **Seed variance in BER improvement is low** — the Viterbi decoder's performance is deterministic given the error pattern, and error patterns vary across seeds.
 
 ### 3.5 Algorithm Complexity
 
 | Pipeline Stage | Mean Time (s) | Fraction | Asymptotic Complexity |
 |---------------|--------------|----------|----------------------|
-| Source Encoding | 0.361 | 9.6% | O(N) — DCT, quantization, RLE, Huffman |
-| Channel Encoding | 0.060 | 1.6% | O(N) — Convolutional encoding |
-| Interleaving | 0.070 | 1.9% | O(N) — Block permutation |
-| Channel Transmission | 0.038 | 1.0% | O(N) — Bit-wise operations |
-| Channel Decoding | 2.518 | 66.8% | O(N·2^K) — Viterbi (K=7, 64 states) |
-| Source Decoding | 0.722 | 19.1% | O(N) — Huffman decode, IDCT |
-| **Total** | **3.769** | **100%** | — |
-
-#### Complexity Scaling Verification
-
-Linear fitting of encoding time vs. source bit count:
-
-| Stage | Fitted Slope (s/bit) | R² | O(N) Valid? |
-|-------|---------------------|-----|-------------|
-| Source Encoding | 2.9 × 10⁻⁷ | 0.91 | ✓ |
-| Channel Encoding | 1.2 × 10⁻⁷ | 0.96 | ✓ |
-| Viterbi Decoding | 8.6 × 10⁻⁶ | 0.85 | ✓ (×30 of encoding) |
-
-The Viterbi decoder's time is approximately 30× that of channel encoding, consistent with the theoretical O(2^K) = O(128) overhead per bit for K=7.
+| Source Encoding | 0.200 | 5.0% | O(N) — DCT, quantization, RLE, Huffman |
+| Channel Encoding | 0.037 | 0.9% | O(N) — Convolutional encoding |
+| Interleaving | 0.050 | 1.2% | O(N) — Block permutation |
+| Channel Transmission | 0.017 | 0.4% | O(N) — Bit-wise operations |
+| Channel Decoding | 3.021 | 75.3% | O(N·2^K) — Viterbi (K=7, 64 states) |
+| Source Decoding | 0.688 | 17.2% | O(N) — Huffman decode, IDCT |
+| **Total** | **4.013** | **100%** | — |
 
 #### Key Performance Observations
 
-- **Viterbi decoding is the bottleneck** (67% of end-to-end latency). For a 256×256 image, mean decoding time is ~2.5 seconds.
-- **Noise images are 3–5× slower** than smooth images due to larger compressed bitstreams (low compression ratio → more bits to process).
-- **Source encoding time is independent of quality factor** for the same image, as the DCT and Huffman operations process all 8×8 blocks regardless of Q.
+- **Viterbi decoding is the dominant bottleneck** (75% of end-to-end latency). For a 256×256 image, mean decoding time is ~3.0 seconds in pure Python.
+- **Noise images are significantly slower** due to larger compressed bitstreams (low compression ratio → more bits to process through Viterbi). Synthetic noise at Q=90 takes 30-35 seconds for Viterbi alone.
+- **Source encoding time is mostly independent of quality factor** for the same image, confirming O(N) complexity.
+- **Pure Python implementation overhead:** The Viterbi decoder processes ~64 million inner-loop iterations for 1M encoded bits. An optimized C/C++ implementation would be 50-100× faster.
 
-### 3.6 Repeat Encoding Impact
+### 3.6 Repeat Encoding Impact (Preliminary)
 
-#### BSC (ε = 0.05, Q = 50, synthetic_nature)
+*Note: Full repeat-scan experiments were computationally prohibitive in pure Python. The following analysis is based on single-seed measurements for the `synthetic_nature` image.*
 
-| Repeat N | Compression Ratio | PSNR (dB) | SSIM | Quality Improvement |
-|----------|-------------------|-----------|------|---------------------|
-| 1 | 15.7× | 7.4 | 0.078 | — (baseline) |
-| 3 | 5.2× | 10.3 | 0.309 | +2.9 dB |
-| 5 | 3.1× | 14.4 | 0.625 | +7.0 dB |
-
-#### BEC (p = 0.10, Q = 50, synthetic_nature)
-
-| Repeat N | Compression Ratio | PSNR (dB) | SSIM | Quality Improvement |
-|----------|-------------------|-----------|------|---------------------|
-| 1 | 15.7× | 13.5 | 0.566 | — (baseline) |
-| 3 | 5.2× | 27.0 | 0.955 | +13.5 dB |
-| 5 | 3.1× | 41.0 | 0.975 | +27.5 dB |
+| Repeat N | BSC ε=0.05, Q=50 | BEC p=0.1, Q=50 |
+|----------|-------------------|------------------|
+| | PSNR (dB) / CR / Time | PSNR (dB) / CR / Time |
+| 1 | 7.4 / 15.7× / 1.1s | 13.5 / 15.7× / 2.2s |
+| 3 | 10.3 / 5.2× / 3.7s | 27.0 / 5.2× / 9.7s |
+| 5 | 14.4 / 3.1× / 4.6s | 41.0 / 3.1× / 16.0s |
 
 **Analysis:**
 
-- **Repeat encoding is highly effective on BEC.** With N=5, PSNR recovers from 13.5 dB (poor) to 41.0 dB (excellent), approaching error-free quality. The majority voting across 5 repetitions eliminates nearly all residual errors after Viterbi decoding.
-- **BSC benefits are more modest.** Even with N=5, PSNR only reaches 14.4 dB, because the Viterbi decoder fails to correct most errors initially, and majority voting across repetitions that are all erroneous provides limited benefit.
-- **Bandwidth cost is proportional to N:** compression ratio drops from 15.7× (N=1) to 3.1× (N=5), a 5× bandwidth penalty.
+- **Repeat encoding is effective on BEC.** With N=5, PSNR recovers from 13.5 dB (poor) to 41.0 dB (excellent), approaching error-free quality. Majority voting across 5 repetitions eliminates nearly all residual errors after Viterbi decoding.
+- **BSC benefits are more modest.** Even with N=5, PSNR only reaches 14.4 dB. Since Viterbi on BSC fails to correct most errors initially, majority voting starts from a poor baseline (~5.3% BER).
+- **Bandwidth penalty:** Compression ratio drops proportionally to N (15.7× → 3.1× for N=5), a 5× bandwidth cost.
+- **Computational cost:** Viterbi decoding time scales linearly with bitstream length, making N=5 approximately 5× slower for the channel decoding stage.
 
 ---
 
 ## 4. Visualizations
 
-16 professional charts were generated and are available in `results/figures/`:
+16 professional charts are available in `results/figures/`:
 
 | No. | File | Content |
 |-----|------|---------|
@@ -269,45 +258,48 @@ The Viterbi decoder's time is approximately 30× that of channel encoding, consi
 
 2. **Graceful quality degradation on BEC.** Even at p = 0.20 (20% erasure rate), the reconstructed image retains recognizable structure (SSIM > 0.4 at Q=50).
 
-3. **Effective repeat encoding.** N=5 repeat + majority voting can recover near-lossless quality on BEC at the cost of 5× bandwidth expansion.
+3. **Effective repeat encoding (BEC only).** N=5 repeat + majority voting can recover near-lossless quality on BEC at the cost of 5× bandwidth expansion. However, this is computationally expensive in pure Python.
 
-4. **High compression efficiency.** Up to 35× compression on smooth images while maintaining PSNR > 30 dB under error-free conditions.
+4. **High compression efficiency.** Up to 35× compression on smooth images while maintaining PSNR > 30 dB under error-free conditions. The DCT + Huffman pipeline is well-suited for natural-image statistics.
 
 ### 5.2 Limitations
 
-1. **Poor BSC performance.** The (2,1,7) code cannot correct random errors above ~1% BER with hard-decision decoding. A stronger code (e.g., Turbo or LDPC) or soft-decision demodulation would be needed for BSC channels.
+1. **Hard-decision Viterbi fails on BSC at ε ≥ 1%.** This is the most significant finding. The (2,1,7) convolutional code with rate 1/2 cannot correct random bit flips at the tested error rates using hard-decision decoding. Residual BER after Viterbi is actually *worse* than channel BER. A stronger code (Turbo, LDPC), soft-decision demodulation, or lower-rate code would be required for BSC channels.
 
-2. **Data expansion on high-frequency content.** Noise-like images with Q ≥ 90 produce compressed streams larger than raw data, negating compression benefits.
+2. **Data expansion on high-frequency content.** Noise-like images with Q ≥ 50 produce compressed streams comparable to or larger than raw data, negating compression benefits. Huffman coding provides limited gain on near-random data.
 
-3. **Viterbi complexity.** The O(N·2^K) complexity with K=7 makes the decoder 30× slower than the encoder. For real-time applications, a smaller constraint length or alternative decoding algorithm would be needed.
+3. **Viterbi computational complexity in pure Python.** The O(N·2^K) complexity with K=7 makes the decoder the bottleneck (75% of total time). For the noise image at Q=90 (~1.7M source bits, ~3.3M encoded bits), Viterbi decoding alone takes ~30 seconds. This limits the practicality of running large-scale experiments.
 
-4. **Fixed interleaver size.** The 64×128 block interleaver requires padding, which wastes bandwidth. An adaptive interleaver based on payload size would be more efficient.
+4. **Synthetic images only.** Due to the absence of the Kodak dataset, all experiments used algorithmically generated images. Results on real photographs may differ, particularly for natural-image-specific compression artifacts.
+
+5. **Fixed interleaver size.** The 64×128 block interleaver requires padding to fill complete blocks, adding overhead proportional to the gap between the payload and the nearest multiple of 8192.
 
 ### 5.3 Recommendations
 
-1. **Replace convolutional code with Turbo/LDPC** for BSC channels to achieve better random error correction.
-2. **Implement adaptive interleaver sizing** to minimize padding overhead.
-3. **Add CRC-16** to detect uncorrectable blocks and enable selective retransmission or concealment.
+1. **Replace hard-decision Viterbi with soft-decision for BSC** by implementing log-likelihood ratios from channel observations.
+2. **Implement Turbo or LDPC codes** for BSC channels to achieve better random error correction at high code rates.
+3. **Add CRC-based error detection** to identify and handle uncorrectable blocks through concealment or selective retransmission.
 4. **Use arithmetic coding** instead of Huffman for improved compression, especially on high-frequency content.
-5. **Parallelize Viterbi decoding** using GPU acceleration to reduce latency.
+5. **Implement Viterbi decoder in C/C++ or via Numba JIT** for 50-100× speedup, enabling more comprehensive experiments.
+6. **Use real photographic images** (Kodak, BSDS500, etc.) to validate results against practical use cases.
 
 ---
 
 ## 6. Conclusions
 
-This project successfully implemented an end-to-end image transmission system integrating DCT-based lossy source coding, (2,1,7) convolutional channel coding, block interleaving, and BSC/BEC channel simulation. A comprehensive performance evaluation across 102 experimental conditions yielded the following key conclusions:
+This project successfully implemented an end-to-end image transmission system integrating DCT-based lossy source coding, (2,1,7) convolutional channel coding, block interleaving, and BSC/BEC channel simulation. A comprehensive performance evaluation across 288 experimental conditions (4 images × 3 quality factors × 8 channel conditions × 3 seeds) yielded the following key conclusions:
 
-1. **Source coding** achieves excellent compression (up to 35×) with high PSNR (>30 dB at Q ≥ 50) under error-free conditions. The DCT + Huffman pipeline is computationally efficient (O(N), <10% of total time).
+1. **Source coding** achieves excellent compression (up to 35×) with high PSNR (>30 dB at Q ≥ 50) under error-free conditions. However, performance varies dramatically with image content — smooth images compress 35× while noise images compress < 2×.
 
-2. **Channel coding** provides strong protection on BEC (7–38× BER improvement via soft-decision Viterbi) but is ineffective on BSC at BER > 1%, where the (2,1,7) code's correction capacity is exceeded.
+2. **Convolutional channel coding with hard-decision Viterbi is ineffective on BSC** at ε ≥ 1%. The residual BER after decoding is marginally higher than the channel BER, providing no error correction benefit. This is a fundamental limitation of hard-decision decoding of rate-1/2 convolutional codes in high-BER regimes.
 
-3. **Block interleaving** is critical for BEC performance, converting burst erasures into isolated errors.
+3. **Soft-decision Viterbi on BEC is highly effective,** achieving 9–38× BER reduction by exploiting known erasure positions. Combined with block interleaving, it provides robust protection for erasure channels.
 
-4. **Repeat encoding** (N=5) can recover near-lossless quality on BEC (PSNR 41 dB at p=0.1) at the cost of 5× bandwidth.
+4. **Viterbi decoding is the computational bottleneck** (75% of total time), consistent with its exponential complexity in constraint length (K=7 → 64 states). Pure Python implementation takes ~3 seconds per 256×256 image on average, with worst cases exceeding 30 seconds.
 
-5. **Viterbi decoding is the computational bottleneck** (67% of total time), consistent with its exponential complexity in constraint length.
+5. **PSNR and SSIM are strongly correlated** (R² > 0.9), providing consistent quality assessment across all conditions.
 
-6. **PSNR and SSIM are strongly correlated** (R² > 0.9), providing consistent quality assessment across all conditions.
+6. **Repeat encoding (N=5) can compensate for BEC channel errors** at the cost of proportional bandwidth expansion, recovering near-lossless quality for erasure rates up to p=0.1.
 
 ---
 
@@ -317,12 +309,19 @@ This project successfully implemented an end-to-end image transmission system in
 # Install dependencies
 pip install -r requirements.txt
 
-# Full analysis pipeline
-python scripts/analysis.py --quick          # Run experiments + generate 9 charts
-python scripts/plot_advanced.py             # Generate 7 additional charts
+# Run full experiment suite (~20 min, 288 experiments)
+python scripts/run_full_experiments.py --medium --no-repeats --csv results/analysis.csv
 
-# Re-plot from existing data
-python scripts/analysis.py --from-csv results/analysis.csv
+# Quick validation (~5 min, 96 experiments, single seed)
+python scripts/run_full_experiments.py --quick --no-repeats
+
+# Generate figures from experimental data
+python -c "
+from scripts.analysis import load_csv, generate_all_charts
+results = load_csv('results/analysis.csv')
+generate_all_charts(results)
+"
+python scripts/plot_advanced.py --csv results/analysis.csv
 
 # Run all unit tests
 python src/source_coding/test_source_coding.py
@@ -330,8 +329,8 @@ python tests/test_channel_coding.py
 ```
 
 **Output files:**
-- `results/analysis.csv` — Complete experimental data (102 rows, 18 columns)
-- `results/figures/` — 16 professional charts (PNG, 1.7 MB total)
+- `results/analysis.csv` — Complete experimental data (288 rows, 19 columns)
+- `results/figures/` — 16 professional charts (PNG)
 - `report/report_en.md` — This report (English)
 - `report/report_cn.md` — Chinese version
 
