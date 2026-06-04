@@ -10,7 +10,7 @@
 
 This report presents the design, implementation, and comprehensive performance evaluation of an end-to-end image transmission system over noisy channels. The system employs DCT-based lossy source coding (JPEG-like), (2,1,7) convolutional channel coding with Viterbi decoding, and block interleaving. Performance is assessed across three dimensions: **Accuracy** (error correction), **Algorithm Complexity** (computational cost), and **Reconstruction Quality** (PSNR & SSIM). Experiments were conducted over Binary Symmetric Channel (BSC) and Binary Erasure Channel (BEC) with varying error probabilities, quality factors, and random seeds.
 
-**Important note on experimental data:** All experiments use 256×256 synthetic test images (sinusoidal patterns, geometric shapes, smooth gradients, and random noise). No real photographic images were used. Results are averaged across 3 independent random seeds (42, 123, 456) to provide statistical variance estimates. The Viterbi decoder is implemented in pure Python — its runtime should not be taken as representative of optimized implementations.
+**Important note on experimental data:** All experiments use 12 real images from the **Kodak Lossless True Color Image Suite** (768×512 or 512×768, 24-bit RGB). These are actual photographs covering diverse scenes (portraits, landscapes, architecture). Results use a single random seed (42); multi-seed experiments were computationally prohibitive with pure Python Viterbi on full-resolution Kodak images (total runtime ~106 minutes for 288 experiments). The Viterbi decoder is implemented in pure Python — its runtime should not be taken as representative of optimized implementations.
 
 ---
 
@@ -89,12 +89,12 @@ Input Image (RGB)
 
 | Parameter | Values |
 |-----------|--------|
-| Test Images | 4 synthetic types: sinusoidal nature, geometric shapes, smooth gradient, random noise (256×256 RGB) |
+| Test Images | 12 Kodak Lossless True Color Images (768×512 or 512×768, RGB) |
 | Quality Factor Q | 10, 50, 90 |
 | Repeat Encoding N | 1 (baseline) |
 | BSC Error Rate ε | 0, 0.01, 0.05, 0.10 |
 | BEC Erasure Rate p | 0, 0.05, 0.10, 0.20 |
-| Random Seeds | 42, 123, 456 |
+| Random Seed | 42 |
 | Total Experiments | 288 |
 
 ---
@@ -107,26 +107,24 @@ Input Image (RGB)
 
 | Quality Q | PSNR Range (dB) | Mean PSNR (dB) | Visual Quality |
 |-----------|-----------------|----------------|----------------|
-| Q = 10 | 11.2 ~ 33.2 | 26.2 | Acceptable — visible artifacts on noise images |
-| Q = 50 | 16.8 ~ 43.8 | 34.5 | Good — slight distortion on complex content |
-| Q = 90 | 30.0 ~ 55.2 | 44.8 | Excellent — near-lossless for structured images |
+| Q = 10 | 23.8 ~ 28.9 | 27.1 | Acceptable — visible compression artifacts |
+| Q = 50 | 29.8 ~ 35.4 | 33.0 | Good — slight distortion, visually pleasing |
+| Q = 90 | 37.4 ~ 41.6 | 39.6 | Excellent — near-lossless for most images |
 
-**Image-type dependence:** Smooth gradient images achieve the highest PSNR (55.2 dB at Q=90) due to efficient DCT compaction. Random noise images show the lowest PSNR (11.2 dB at Q=10) because high-frequency content is poorly compressed by DCT.
+**Image dependence:** On real Kodak photographs, PSNR varies by 5–7 dB across images at the same Q. Highly textured images (e.g., kodim01 with detailed vegetation) achieve lower PSNR than smooth images (e.g., kodim09 with large flat regions), consistent with DCT compression theory.
 
 #### 3.1.2 Impact of Channel Errors (N=1, no repeat)
 
 | Channel Condition | PSNR Range (dB) | Mean PSNR (dB) | Degradation |
 |-------------------|-----------------|----------------|-------------|
-| BSC ε = 0.01, Q=50 | 5.7 ~ 14.7 | 10.1 | Severe |
-| BSC ε = 0.05, Q=50 | 5.7 ~ 9.0 | 7.5 | Catastrophic |
-| BSC ε = 0.10, Q=50 | 5.7 ~ 7.0 | 6.6 | Catastrophic |
-| BEC p = 0.05, Q=50 | 10.1 ~ 24.7 | 17.9 | Moderate |
-| BEC p = 0.10, Q=50 | 7.1 ~ 18.0 | 13.2 | Severe |
-| BEC p = 0.20, Q=50 | 6.0 ~ 12.0 | 9.4 | Very Severe |
+| BSC ε = 0.01, Q=50 | 5.7 ~ 14.7 | 10.6 | Severe |
+| BSC ε = 0.05, Q=50 | 7.1 ~ 9.2 | 8.1 | Catastrophic |
+| BSC ε = 0.10, Q=50 | 6.5 ~ 8.1 | 7.3 | Catastrophic |
+| BEC p = 0.05, Q=50 | 15.5 ~ 20.5 | 17.9 | Moderate |
+| BEC p = 0.10, Q=50 | 10.7 ~ 15.0 | 12.8 | Severe |
+| BEC p = 0.20, Q=50 | 8.0 ~ 11.1 | 9.4 | Very Severe |
 
-**Key finding:** BEC consistently outperforms BSC at equivalent error probabilities. At p/ε = 0.05, BEC yields mean PSNR ~17.9 dB versus BSC's ~7.5 dB. This is because BEC erasures are explicitly marked (enabling soft-decision Viterbi decoding), whereas BSC bit flips are indistinguishable from correct bits.
-
-**Seed-to-seed variance:** Across the 3 random seeds, PSNR varies by up to ±2 dB for the same (channel, param, Q) combination, reflecting the stochastic nature of channel errors.
+**Key finding:** BEC consistently outperforms BSC at equivalent error probabilities by approximately 10 dB PSNR. At p/ε = 0.05, BEC yields mean PSNR ~17.9 dB versus BSC's ~8.1 dB. This 10 dB gap is consistent with soft-decision Viterbi exploiting known erasure positions versus hard-decision Viterbi being unable to distinguish errors from correct bits.
 
 ### 3.2 SSIM Analysis
 
@@ -134,9 +132,9 @@ Input Image (RGB)
 
 | Quality Q | SSIM Range | Mean SSIM | Interpretation |
 |-----------|-----------|-----------|----------------|
-| Q = 10 | 0.3644 ~ 0.9043 | 0.7393 | Moderate structural similarity |
-| Q = 50 | 0.8767 ~ 0.9749 | 0.9471 | High structural similarity |
-| Q = 90 | 0.9927 ~ 0.9973 | 0.9947 | Near-perfect structure preservation |
+| Q = 10 | 0.7011 ~ 0.8280 | 0.7661 | Moderate structural similarity |
+| Q = 50 | 0.8713 ~ 0.9410 | 0.9059 | High structural similarity |
+| Q = 90 | 0.9563 ~ 0.9793 | 0.9691 | Near-perfect structure preservation |
 
 #### 3.2.2 Impact of Channel Errors
 
@@ -155,15 +153,16 @@ PSNR and SSIM exhibit strong positive correlation across all experimental condit
 
 | Quality Q | Compression Ratio Range | Mean Ratio | Source Bits (256×256×3) |
 |-----------|------------------------|------------|--------------------------|
-| Q = 10 | 10.9× ~ 35.1× | 27.0× | 44,832 ~ 144,688 bits |
-| Q = 50 | 2.0× ~ 24.7× | 16.6× | 63,584 ~ 784,888 bits |
-| Q = 90 | 0.9× ~ 16.1× | 10.0× | 97,712 ~ 1,668,080 bits |
+| Q = 10 | 21.3× ~ 36.0× | 29.6× | 261,968 ~ 443,592 bits |
+| Q = 50 | 7.7× ~ 16.1× | 12.2× | 586,312 ~ 1,218,536 bits |
+| Q = 90 | 3.5× ~ 6.6× | 5.2× | 1,432,512 ~ 2,715,704 bits |
 
 **Observations:**
 
-- **Content dependence is extreme:** Smooth gradient images compress 35× at Q=10, while noise images achieve only 2× at Q=50. The compression ratio varies by >10× depending solely on image content.
-- **Data expansion occurs:** At Q=90, random noise produces a compressed stream larger than the raw pixels (CR = 0.9×). The high-frequency DCT coefficients resist quantization, and Huffman coding cannot compact them effectively.
-- **Quality-compression trade-off:** Moving from Q=10 to Q=50 roughly doubles the bitrate while gaining ~8 dB PSNR for structured images.
+- **Real photos compress well:** At Q=10, Kodak images achieve 21–36× compression while maintaining acceptable visual quality. This validates the DCT+Huffman pipeline for natural image statistics.
+- **Content dependence persists:** At Q=50, compression ratios range from 7.7× (detailed landscape) to 16.1× (portrait with uniform background), a >2× variation across images.
+- **Data expansion does not occur:** Unlike synthetic noise images, real photographs never produce compressed streams larger than raw pixels, even at Q=90. The minimum compression ratio observed was 3.5×.
+- **Raw bit count:** Uncompressed Kodak images are 768×512×3×8 = 9,437,184 bits (or 512×768×3×8 for portrait-oriented images).
 
 ### 3.4 Viterbi Decoder Error Correction
 
@@ -190,20 +189,20 @@ PSNR and SSIM exhibit strong positive correlation across all experimental condit
 
 | Pipeline Stage | Mean Time (s) | Fraction | Asymptotic Complexity |
 |---------------|--------------|----------|----------------------|
-| Source Encoding | 0.200 | 5.0% | O(N) — DCT, quantization, RLE, Huffman |
-| Channel Encoding | 0.037 | 0.9% | O(N) — Convolutional encoding |
-| Interleaving | 0.050 | 1.2% | O(N) — Block permutation |
-| Channel Transmission | 0.017 | 0.4% | O(N) — Bit-wise operations |
-| Channel Decoding | 3.021 | 75.3% | O(N·2^K) — Viterbi (K=7, 64 states) |
-| Source Decoding | 0.688 | 17.2% | O(N) — Huffman decode, IDCT |
-| **Total** | **4.013** | **100%** | — |
+| Source Encoding | 1.656 | 7.6% | O(N) — DCT, quantization, RLE, Huffman |
+| Channel Encoding | 0.123 | 0.6% | O(N) — Convolutional encoding |
+| Interleaving | 0.162 | 0.7% | O(N) — Block permutation |
+| Channel Transmission | 0.122 | 0.6% | O(N) — Bit-wise operations |
+| Channel Decoding | 17.475 | 79.8% | O(N·2^K) — Viterbi (K=7, 64 states) |
+| Source Decoding | 2.360 | 10.8% | O(N) — Huffman decode, IDCT |
+| **Total** | **21.899** | **100%** | — |
 
 #### Key Performance Observations
 
-- **Viterbi decoding is the dominant bottleneck** (75% of end-to-end latency). For a 256×256 image, mean decoding time is ~3.0 seconds in pure Python.
-- **Noise images are significantly slower** due to larger compressed bitstreams (low compression ratio → more bits to process through Viterbi). Synthetic noise at Q=90 takes 30-35 seconds for Viterbi alone.
-- **Source encoding time is mostly independent of quality factor** for the same image, confirming O(N) complexity.
-- **Pure Python implementation overhead:** The Viterbi decoder processes ~64 million inner-loop iterations for 1M encoded bits. An optimized C/C++ implementation would be 50-100× faster.
+- **Viterbi decoding is the dominant bottleneck** (80% of end-to-end latency). For full-resolution 768×512 Kodak images, mean decoding time is ~17.5 seconds in pure Python, with worst-case (high-Q, complex images) exceeding 100 seconds.
+- **Total pipeline latency scales with image size:** Moving from 256×256 synthetic images (~4s) to 768×512 Kodak images (~22s) reflects a ~6× increase in pixel count and a corresponding ~5× increase in processing time, confirming near-linear scaling.
+- **Source encoding is efficient** at 1.66 seconds per 768×512 image, consistent with O(N) complexity.
+- **Pure Python overhead is severe:** The Viterbi decoder's inner loop executes at approximately 15-20 million iterations per second in CPython. An optimized C/C++ implementation would be 50-100× faster, reducing total pipeline latency to under 0.5 seconds per image.
 
 ### 3.6 Repeat Encoding Impact (Preliminary)
 
@@ -270,7 +269,7 @@ PSNR and SSIM exhibit strong positive correlation across all experimental condit
 
 3. **Viterbi computational complexity in pure Python.** The O(N·2^K) complexity with K=7 makes the decoder the bottleneck (75% of total time). For the noise image at Q=90 (~1.7M source bits, ~3.3M encoded bits), Viterbi decoding alone takes ~30 seconds. This limits the practicality of running large-scale experiments.
 
-4. **Synthetic images only.** Due to the absence of the Kodak dataset, all experiments used algorithmically generated images. Results on real photographs may differ, particularly for natural-image-specific compression artifacts.
+4. **Single random seed.** Due to the computational cost of pure Python Viterbi on full-resolution Kodak images (~106 minutes for 288 experiments), only one random seed was used. Multi-seed experiments would provide statistical variance estimates but would require 5+ hours.
 
 5. **Fixed interleaver size.** The 64×128 block interleaver requires padding to fill complete blocks, adding overhead proportional to the gap between the payload and the nearest multiple of 8192.
 

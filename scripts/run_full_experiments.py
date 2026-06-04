@@ -57,15 +57,42 @@ def parse_args() -> argparse.Namespace:
                         help='跳过 repeat 扫描 (大幅加速)')
     parser.add_argument('--seeds', type=str, default=None,
                         help='逗号分隔的 seeds 列表, 如 "42,123,456"')
+    parser.add_argument('--images', type=int, default=0,
+                        help='使用前 N 张图片 (0=全部)')
     return parser.parse_args()
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 测试图像生成
+# 图像加载
 # ═══════════════════════════════════════════════════════════════════════
 
+def discover_kodak_images(subset: int = 0) -> Dict[str, np.ndarray]:
+    """从 data/ 目录加载 PNG 图片，返回 {文件名: numpy_array}。"""
+    from PIL import Image
+
+    data_dir = 'data'
+    if not os.path.isdir(data_dir):
+        return {}
+
+    images: Dict[str, np.ndarray] = {}
+    files = sorted(f for f in os.listdir(data_dir)
+                   if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')))
+    if subset and subset < len(files):
+        files = files[:subset]
+
+    for f in files:
+        path = os.path.join(data_dir, f)
+        try:
+            img = np.array(Image.open(path).convert('RGB'), dtype=np.uint8)
+            images[f] = img
+        except Exception as e:
+            print(f"  [WARN] 跳过 {path}: {e}")
+
+    return images
+
+
 def generate_test_images(seed: int = 42) -> Dict[str, np.ndarray]:
-    """生成 4 张 256×256 合成测试图像，覆盖不同频率特性。"""
+    """生成 4 张 256×256 合成测试图像，覆盖不同频率特性（fallback）。"""
     rng = np.random.RandomState(seed)
     images: Dict[str, np.ndarray] = {}
     H, W = 256, 256
@@ -326,17 +353,17 @@ def append_csv(path: str, row: Dict[str, Any]) -> None:
 def main() -> None:
     args = parse_args()
 
-    # 模式选择: medium > quick > full
+    # 模式选择: medium(推荐) > quick > full
     if args.medium:
         bsc_params = BSC_PARAMS_QUICK
         bec_params = BEC_PARAMS_QUICK
         q_values = Q_VALUES_QUICK
-        seeds = SEEDS_FULL
+        seeds = [42]  # 12张Kodak图 × 1seed ≈ 2h
     elif args.quick:
         bsc_params = BSC_PARAMS_QUICK
         bec_params = BEC_PARAMS_QUICK
         q_values = Q_VALUES_QUICK
-        seeds = SEEDS_QUICK
+        seeds = [42]
     else:
         bsc_params = BSC_PARAMS_FULL
         bec_params = BEC_PARAMS_FULL
@@ -347,11 +374,14 @@ def main() -> None:
     if args.seeds:
         seeds = [int(s.strip()) for s in args.seeds.split(',')]
 
-    # 生成图像
-    images = generate_test_images(seed=42)
-    print(f"使用 {len(images)} 张合成测试图像 (256×256 RGB):")
+    # 从 data/ 加载 Kodak 真实图片
+    images = discover_kodak_images(subset=args.images)
+    if not images:
+        print("[ERROR] data/ 目录未找到图片，请放入 PNG 文件")
+        sys.exit(1)
+    print(f"使用 {len(images)} 张 Kodak 真实图片:")
     for name, img in images.items():
-        print(f"  - {name}: {img.shape}")
+        print(f"  - {name}: {img.shape[1]}×{img.shape[0]}, {img.shape[2]} channels")
 
     # 构建实验列表
     experiments: List[Tuple] = []
@@ -369,24 +399,27 @@ def main() -> None:
                     for seed in seeds:
                         experiments.append((ch_type, param, q, img_name, img, 1, seed))
 
-    # Repeat 扫描 (仅用一张图 + 中等参数)
+    # Repeat 扫描 (仅用第一张图 + 中等参数)
     if not args.no_repeats:
-        for seed in seeds:
+        first_img_name = list(images.keys())[0]
+        first_img = images[first_img_name]
+        for seed in seeds[:1]:  # 仅单种子
             for repeat in [3, 5]:
-                img_name = 'synthetic_nature'
-                img = images[img_name]
-                experiments.append(('bsc', 0.05, 50, img_name, img, repeat, seed))
-                experiments.append(('bec', 0.1, 50, img_name, img, repeat, seed))
+                experiments.append(('bsc', 0.05, 50, first_img_name, first_img, repeat, seed))
+                experiments.append(('bec', 0.1, 50, first_img_name, first_img, repeat, seed))
 
     total = len(experiments)
+    avg_img_pixels = int(np.mean([img.size for img in images.values()]))
+    est_sec_per_exp = avg_img_pixels / (256 * 256 * 3) * 1.5  # 相对于256×256的缩放
     print(f"\n参数空间:")
     print(f"  BSC ε ∈ {bsc_params}")
     print(f"  BEC p ∈ {bec_params}")
     print(f"  Q     ∈ {q_values}")
     print(f"  Seeds ∈ {seeds}")
-    print(f"  Repeat扫描: {'跳过' if args.no_repeats else '包含 (仅 synthetic_nature)'}")
+    print(f"  Repeat扫描: {'跳过' if args.no_repeats else '包含 (仅第一张图)'}")
+    print(f"  平均图像尺寸: {avg_img_pixels/1000:.0f}k 像素")
     print(f"  总计 {total} 组实验")
-    print(f"  预计耗时: ~{total * 1.5 / 60:.0f} 分钟 (Viterbi 纯 Python)")
+    print(f"  预计耗时: ~{total * est_sec_per_exp / 60:.0f} 分钟 (Viterbi 纯 Python)")
     print("=" * 60)
 
     # 初始化 CSV
